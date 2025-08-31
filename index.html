@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>三屏幻灯片壁纸</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+        }
+        
+        #slideshow-container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: row;
+        }
+        
+        .slideshow-panel {
+            flex: 1;
+            height: 100%;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .slideshow-panel img, .slideshow-panel video {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            object-fit: cover; /* 保持比例并填满视口，允许裁剪 */
+            opacity: 0;
+            transition: opacity 1s ease-in-out;
+        }
+        
+        .slideshow-panel img.active, .slideshow-panel video.active {
+            opacity: 1;
+        }
+        
+        .slideshow-panel video {
+            outline: none;
+        }
+        
+        /* 面板之间的分隔线 */
+        .slideshow-panel:not(:last-child) {
+            border-right: 1px solid rgba(255, 255, 255, 0.1);
+        }
+    </style>
+</head>
+<body>
+    <div id="slideshow-container">
+        <div class="slideshow-panel" id="panel-left"></div>
+        <div class="slideshow-panel" id="panel-center"></div>
+        <div class="slideshow-panel" id="panel-right"></div>
+    </div>
+
+    <script>
+        // 图片列表
+        let images = [];
+        
+        // 获取图片列表
+        fetch('./media/list.json')
+            .then(response => response.json())
+            .then(data => {
+                images = data;
+                initSlideshow();
+            })
+            .catch(error => {
+                console.error('Error loading image list:', error);
+            });
+            
+        // 初始化幻灯片
+        function initSlideshow() {
+            if (images.length === 0) return;
+            
+            // 初始化三个面板
+            initPanel('panel-left', 0);
+            initPanel('panel-center', 1);
+            initPanel('panel-right', 2);
+        }
+        
+        // 初始化单个面板
+        function initPanel(panelId, startIndex) {
+            const panel = document.getElementById(panelId);
+            const panelData = {
+                currentIndex: startIndex,
+                isPlayingVideo: false,
+                mediaElement: null
+            };
+            
+            // 将面板数据存储在元素上
+            panel.panelData = panelData;
+            
+            // 显示初始媒体
+            displayMedia(panel, startIndex);
+            
+            // 启动面板循环
+            startPanelLoop(panel);
+        }
+        
+        // 判断是否为视频文件
+        function isVideoFile(filename) {
+            const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.wmv'];
+            return videoExtensions.some(ext => filename.toLowerCase().endsWith(ext));
+        }
+        
+        // 创建媒体元素
+        function createMediaElement(filename) {
+            if (isVideoFile(filename)) {
+                const video = document.createElement('video');
+                video.autoplay = false;
+                video.muted = true;
+                video.loop = false;
+                video.controls = false;
+                video.playsInline = true;
+                return video;
+            } else {
+                return document.createElement('img');
+            }
+        }
+        
+        // 加载媒体文件
+        function loadMedia(mediaElement, filename) {
+            return new Promise((resolve, reject) => {
+                // 清除之前的媒体
+                mediaElement.className = '';
+                
+                if (mediaElement.tagName === 'VIDEO') {
+                    mediaElement.src = './media/' + filename;
+                    mediaElement.onloadeddata = function() {
+                        resolve();
+                    };
+                    mediaElement.onerror = function() {
+                        console.error('Failed to load video:', filename);
+                        reject();
+                    };
+                } else {
+                    // 图片处理
+                    const img = new Image();
+                    img.onload = function() {
+                        mediaElement.src = './media/' + filename;
+                        resolve();
+                    };
+                    img.onerror = function() {
+                        console.error('Failed to load image:', filename);
+                        reject();
+                    };
+                    img.src = './media/' + filename;
+                }
+            });
+        }
+        
+        // 显示指定索引的媒体
+        function displayMedia(panel, index) {
+            const panelData = panel.panelData;
+            const filename = images[index];
+            if (!filename) return;
+            
+            // 创建新的媒体元素
+            const newMediaElement = createMediaElement(filename);
+            newMediaElement.alt = 'Slideshow Media';
+            
+            // 如果有当前媒体元素，移除它
+            if (panelData.mediaElement) {
+                panel.removeChild(panelData.mediaElement);
+            }
+            
+            // 设置新元素
+            panelData.mediaElement = newMediaElement;
+            panel.appendChild(panelData.mediaElement);
+            
+            // 加载媒体
+            loadMedia(panelData.mediaElement, filename).then(() => {
+                panelData.mediaElement.classList.add('active');
+                
+                // 如果是视频，监听播放结束事件
+                if (panelData.mediaElement.tagName === 'VIDEO') {
+                    panelData.isPlayingVideo = true;
+                    panelData.mediaElement.onended = function() {
+                        panelData.isPlayingVideo = false;
+                        nextMedia(panel);
+                    };
+                    // 播放视频
+                    panelData.mediaElement.play().catch(e => {
+                        console.error('Video play error:', e);
+                        // 如果播放失败，直接跳到下一个
+                        panelData.isPlayingVideo = false;
+                        nextMedia(panel);
+                    });
+                }
+            }).catch(() => {
+                // 如果加载失败，直接跳到下一个
+                if (panelData.mediaElement) {
+                    panel.removeChild(panelData.mediaElement);
+                    panelData.mediaElement = null;
+                }
+                nextMedia(panel);
+            });
+        }
+        
+        // 切换到下一张媒体
+        function nextMedia(panel) {
+            const panelData = panel.panelData;
+            
+            // 计算下一张媒体索引（随机选择，但不重复当前的）
+            let nextIndex;
+            do {
+                nextIndex = Math.floor(Math.random() * images.length);
+            } while (nextIndex === panelData.currentIndex && images.length > 1);
+            
+            // 更新当前索引
+            panelData.currentIndex = nextIndex;
+            
+            // 显示下一张媒体
+            displayMedia(panel, panelData.currentIndex);
+        }
+        
+        // 启动面板循环
+        function startPanelLoop(panel) {
+            const panelData = panel.panelData;
+            
+            // 生成随机间隔时间（5-10秒）
+            const interval = Math.floor(Math.random() * 6) + 5; // 5-10秒
+            
+            // 设置定时器
+            setTimeout(() => {
+                // 只有在没有播放视频时才自动切换
+                if (!panelData.isPlayingVideo) {
+                    nextMedia(panel);
+                }
+                
+                // 重新启动循环
+                startPanelLoop(panel);
+            }, interval * 1000);
+        }
+    </script>
+</body>
+</html>
