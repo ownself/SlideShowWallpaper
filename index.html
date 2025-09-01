@@ -126,10 +126,43 @@
         function initSlideshow() {
             if (images.length === 0) return; // 没有媒体则不处理
 
-            // 初始化三个面板（起始索引可自行调整）
-            initPanel('panel-left', 0);
-            initPanel('panel-center', 1);
-            initPanel('panel-right', 2);
+            // 生成三个不重复的随机索引
+            const randomIndices = getRandomIndices(3, images.length);
+            
+            // 初始化三个面板（起始索引现在是随机的）
+            initPanel('panel-left', randomIndices[0]);
+            initPanel('panel-center', randomIndices[1]);
+            initPanel('panel-right', randomIndices[2]);
+        }
+
+        // ===================== 随机索引生成 =====================
+        /**
+         * getRandomIndices(count, max)
+         * @param {number} count - 需要生成的索引数量
+         * @param {number} max - 索引的最大值（不包含）
+         * @returns {Array<number>} 不重复的随机索引数组
+         * 说明: 生成指定数量的不重复随机索引
+         */
+        function getRandomIndices(count, max) {
+            if (count > max) {
+                // 如果需要的索引数量大于最大值，则返回顺序索引
+                return Array.from({length: count}, (_, i) => i % max);
+            }
+            
+            const indices = [];
+            const used = new Set();
+            
+            for (let i = 0; i < count; i++) {
+                let randomIndex;
+                do {
+                    randomIndex = Math.floor(Math.random() * max);
+                } while (used.has(randomIndex) && used.size < max);
+                
+                indices.push(randomIndex);
+                used.add(randomIndex);
+            }
+            
+            return indices;
         }
 
         // ===================== 面板初始化 =====================
