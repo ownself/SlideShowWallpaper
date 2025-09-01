@@ -1,10 +1,27 @@
 <!DOCTYPE html>
 <html lang="zh">
 <head>
+    <!--
+        lang="zh" 指明页面的主要语言为中文，利于搜索引擎与无障碍工具。
+    -->
     <meta charset="UTF-8">
+    <!--
+        viewport 设置保证在不同设备（尤其是移动端）上按比例缩放，
+        width=device-width: 视口宽度等于设备宽度
+        initial-scale=1.0: 初始缩放比例 1
+    -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>三屏幻灯片壁纸</title>
+
+    <!--
+        这里使用内联 <style>，方便单文件演示。
+        实际项目可考虑抽离到独立 CSS 文件。
+    -->
     <style>
+        /*
+            body, html 设为 100% 尺寸，清除默认 margin/padding，
+            并禁止滚动（overflow: hidden），背景纯黑。
+        */
         body, html {
             margin: 0;
             padding: 0;
@@ -13,21 +30,33 @@
             overflow: hidden;
             background-color: #000;
         }
-        
+
+        /*
+            外层容器使用 flex 布局 水平排列三个面板。
+        */
         #slideshow-container {
             width: 100%;
             height: 100%;
             display: flex;
             flex-direction: row;
         }
-        
+
+        /*
+            每个面板 flex:1 平分宽度，position:relative 以便其子元素（绝对定位的 img/video）覆盖填充。
+            overflow:hidden 防止媒体溢出。
+        */
         .slideshow-panel {
             flex: 1;
             height: 100%;
             position: relative;
             overflow: hidden;
         }
-        
+
+        /*
+            面板内的图片与视频采用绝对定位 + 宽高 100%，
+            object-fit: cover 保持比例填满裁剪以适应各种分辨率。
+            初始透明度 0，使用过渡实现淡入。
+        */
         .slideshow-panel img, .slideshow-panel video {
             position: absolute;
             width: 100%;
@@ -36,99 +65,145 @@
             opacity: 0;
             transition: opacity 1s ease-in-out;
         }
-        
+
+        /* 激活（当前显示）媒体添加 active 类，令其淡入显示 */
         .slideshow-panel img.active, .slideshow-panel video.active {
             opacity: 1;
         }
-        
+
+        /* 去掉视频的默认外轮廓（聚焦时的边框） */
         .slideshow-panel video {
             outline: none;
         }
-        
-        /* 面板之间的分隔线 */
+
+        /* 面板之间加一条轻微分隔线（最后一个不加） */
         .slideshow-panel:not(:last-child) {
             border-right: 1px solid rgba(255, 255, 255, 0.1);
         }
     </style>
 </head>
 <body>
+    <!--
+        三个面板：左 / 中 / 右。
+        通过 JS 分别独立随机轮播，实现互不干扰的多屏幻灯效果。
+    -->
     <div id="slideshow-container">
         <div class="slideshow-panel" id="panel-left"></div>
         <div class="slideshow-panel" id="panel-center"></div>
         <div class="slideshow-panel" id="panel-right"></div>
     </div>
 
+    <!--
+        下方脚本：
+        1. 异步获取媒体文件列表 list.json（应放在 ./media/ 目录）
+        2. 为三个面板初始化并循环播放（随机间隔 + 随机下一个媒体）
+        3. 支持图片与常见视频格式（扩展在 isVideoFile 中）
+    -->
     <script>
-        // 图片列表
+        // ===================== 基础数据 =====================
+        // 用于存储媒体文件名（图片或视频），由 list.json 返回，例如：["a.jpg","b.png","c.mp4"]
         let images = [];
-        
-        // 获取图片列表
+
+        // ===================== 载入媒体列表 =====================
+        // fetch('./media/list.json'): 向同目录下 media 文件夹请求 list.json
+        // list.json 需是一个纯数组 JSON，例如: ["1.jpg","2.mp4"]
         fetch('./media/list.json')
             .then(response => response.json())
             .then(data => {
                 images = data;
-                initSlideshow();
+                initSlideshow(); // 列表拉取成功后开始初始化
             })
             .catch(error => {
                 console.error('Error loading image list:', error);
             });
-            
-        // 初始化幻灯片
+
+        // ===================== 初始化入口 =====================
+        /**
+         * initSlideshow
+         * 说明: 若成功获取媒体列表，为三个面板分别按不同起始索引初始化。
+         * 注意: startIndex 只是初始显示顺序，后续播放采用随机选择。
+         */
         function initSlideshow() {
-            if (images.length === 0) return;
-            
-            // 初始化三个面板
+            if (images.length === 0) return; // 没有媒体则不处理
+
+            // 初始化三个面板（起始索引可自行调整）
             initPanel('panel-left', 0);
             initPanel('panel-center', 1);
             initPanel('panel-right', 2);
         }
-        
-        // 初始化单个面板
+
+        // ===================== 面板初始化 =====================
+        /**
+         * initPanel(panelId, startIndex)
+         * @param {string} panelId - 面板 DOM 元素 id
+         * @param {number} startIndex - 初始显示的媒体索引
+         * 说明: 为面板建立一个状态对象 panelData，记录当前索引、视频播放状态等。
+         */
         function initPanel(panelId, startIndex) {
             const panel = document.getElementById(panelId);
             const panelData = {
-                currentIndex: startIndex,
-                isPlayingVideo: false,
-                mediaElement: null
+                currentIndex: startIndex,      // 当前正在展示的媒体索引
+                isPlayingVideo: false,         // 是否正在播放视频（用于控制定时切换）
+                mediaElement: null             // 当前的 <img> 或 <video>
             };
-            
-            // 将面板数据存储在元素上
+
+            // 将面板数据存储在元素实例上，便于后续访问
             panel.panelData = panelData;
-            
+
             // 显示初始媒体
             displayMedia(panel, startIndex);
-            
-            // 启动面板循环
+
+            // 启动递归循环（随机间隔触发）
             startPanelLoop(panel);
         }
-        
-        // 判断是否为视频文件
+
+        // ===================== 媒体类型判断 =====================
+        /**
+         * isVideoFile(filename)
+         * @param {string} filename - 文件名
+         * @returns {boolean} 是否是视频类型
+         * 说明: 用文件扩展名简单判断，可按需要扩展。
+         */
         function isVideoFile(filename) {
             const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.wmv'];
             return videoExtensions.some(ext => filename.toLowerCase().endsWith(ext));
         }
-        
-        // 创建媒体元素
+
+        // ===================== 创建媒体元素 =====================
+        /**
+         * createMediaElement(filename)
+         * @param {string} filename - 文件名
+         * @returns {HTMLImageElement|HTMLVideoElement} 对应的媒体元素
+         */
         function createMediaElement(filename) {
             if (isVideoFile(filename)) {
                 const video = document.createElement('video');
+                // 这里不自动 autoplay，在 loadMedia 之后再手动 play，便于捕获错误
                 video.autoplay = false;
-                video.muted = true;
-                video.loop = false;
-                video.controls = false;
-                video.playsInline = true;
+                video.muted = true;      // 静音播放，防止浏览器自动播放策略阻止
+                video.loop = false;      // 播放完后切换到下一个媒体
+                video.controls = false;  // 不显示控制条（作为壁纸展示）
+                video.playsInline = true;// iOS Safari 内联播放
                 return video;
             } else {
                 return document.createElement('img');
             }
         }
-        
-        // 加载媒体文件
+
+        // ===================== 加载媒体资源 =====================
+        /**
+         * loadMedia(mediaElement, filename)
+         * @param {HTMLElement} mediaElement - <img> 或 <video>
+         * @param {string} filename - 媒体文件名
+         * @returns {Promise<void>} 媒体加载完成或失败
+         * 说明: 对图片先新建 Image 进行预加载，成功后再赋值；
+         *       对视频使用 onloadeddata 事件；失败时 reject，外层会处理。
+         */
         function loadMedia(mediaElement, filename) {
             return new Promise((resolve, reject) => {
-                // 清除之前的媒体
+                // 清除之前的 class（例如 active）
                 mediaElement.className = '';
-                
+
                 if (mediaElement.tagName === 'VIDEO') {
                     mediaElement.src = './media/' + filename;
                     mediaElement.onloadeddata = function() {
@@ -139,7 +214,7 @@
                         reject();
                     };
                 } else {
-                    // 图片处理
+                    // 图片处理：预先创建一个 Image 对象测试能否加载
                     const img = new Image();
                     img.onload = function() {
                         mediaElement.src = './media/' + filename;
@@ -153,47 +228,57 @@
                 }
             });
         }
-        
-        // 显示指定索引的媒体
+
+        // ===================== 显示指定媒体 =====================
+        /**
+         * displayMedia(panel, index)
+         * @param {HTMLElement} panel - 面板元素
+         * @param {number} index - 要显示的媒体索引
+         * 说明: 创建新媒体元素并替换旧的；加载成功后添加 active 类实现淡入；若是视频则播放并监听结束。
+         */
         function displayMedia(panel, index) {
             const panelData = panel.panelData;
             const filename = images[index];
             if (!filename) return;
-            
+
             // 创建新的媒体元素
             const newMediaElement = createMediaElement(filename);
-            newMediaElement.alt = 'Slideshow Media';
-            
-            // 如果有当前媒体元素，移除它
+            newMediaElement.alt = 'Slideshow Media'; // 若为图片，提供基本替代文本
+
+            // 移除旧元素（直接删除，无淡出动画；可按需扩展）
             if (panelData.mediaElement) {
                 panel.removeChild(panelData.mediaElement);
             }
-            
-            // 设置新元素
+
+            // 记录并添加到 DOM
             panelData.mediaElement = newMediaElement;
             panel.appendChild(panelData.mediaElement);
-            
-            // 加载媒体
+
+            // 加载文件
             loadMedia(panelData.mediaElement, filename).then(() => {
+                // 加载成功，显示（淡入）
                 panelData.mediaElement.classList.add('active');
-                
-                // 如果是视频，监听播放结束事件
+
+                // 视频处理
                 if (panelData.mediaElement.tagName === 'VIDEO') {
-                    panelData.isPlayingVideo = true;
+                    panelData.isPlayingVideo = true; // 标记正在播放
+
+                    // 播放完自动切换
                     panelData.mediaElement.onended = function() {
                         panelData.isPlayingVideo = false;
                         nextMedia(panel);
                     };
-                    // 播放视频
+
+                    // 尝试播放（有可能被浏览器策略拦截，已静音一般不会）
                     panelData.mediaElement.play().catch(e => {
                         console.error('Video play error:', e);
-                        // 如果播放失败，直接跳到下一个
+                        // 播放失败当作图片一样直接换下一个
                         panelData.isPlayingVideo = false;
                         nextMedia(panel);
                     });
                 }
             }).catch(() => {
-                // 如果加载失败，直接跳到下一个
+                // 加载失败：移除占位并尝试下一个
                 if (panelData.mediaElement) {
                     panel.removeChild(panelData.mediaElement);
                     panelData.mediaElement = null;
@@ -201,39 +286,45 @@
                 nextMedia(panel);
             });
         }
-        
-        // 切换到下一张媒体
+
+        // ===================== 切换到下一个媒体 =====================
+        /**
+         * nextMedia(panel)
+         * @param {HTMLElement} panel - 面板元素
+         * 说明: 随机选取一个不同于当前索引的媒体，更新并显示。
+         */
         function nextMedia(panel) {
             const panelData = panel.panelData;
-            
-            // 计算下一张媒体索引（随机选择，但不重复当前的）
+
+            // 随机选取下一个索引（避免与当前相同，除非只有一个媒体）
             let nextIndex;
             do {
                 nextIndex = Math.floor(Math.random() * images.length);
             } while (nextIndex === panelData.currentIndex && images.length > 1);
-            
-            // 更新当前索引
+
             panelData.currentIndex = nextIndex;
-            
-            // 显示下一张媒体
             displayMedia(panel, panelData.currentIndex);
         }
-        
-        // 启动面板循环
+
+        // ===================== 循环调度（随机间隔） =====================
+        /**
+         * startPanelLoop(panel)
+         * @param {HTMLElement} panel - 面板元素
+         * 说明: 生成 5~10 秒的随机间隔，间隔到期如果当前不是视频播放中则调用 nextMedia。
+         *       然后递归再次设置新的定时器，实现持续循环。
+         */
         function startPanelLoop(panel) {
             const panelData = panel.panelData;
-            
-            // 生成随机间隔时间（5-10秒）
+
+            // 随机间隔（秒）[5,10]
             const interval = Math.floor(Math.random() * 6) + 5; // 5-10秒
-            
-            // 设置定时器
+
             setTimeout(() => {
-                // 只有在没有播放视频时才自动切换
+                // 如果当前没有视频在播放，执行切换
                 if (!panelData.isPlayingVideo) {
                     nextMedia(panel);
                 }
-                
-                // 重新启动循环
+                // 递归继续循环
                 startPanelLoop(panel);
             }, interval * 1000);
         }
