@@ -51,6 +51,38 @@
             position: relative;
             overflow: hidden;
         }
+        
+        /* 全屏布局容器 */
+        #fullscreen-container {
+            width: 100%;
+            height: 100%;
+            position: fixed;
+            top: 0;
+            left: 0;
+            overflow: hidden;
+            background-color: #000;
+            z-index: 1000;
+        }
+        
+        /* 隐藏类 */
+        .hidden {
+            display: none;
+        }
+        
+        /* 全屏布局下的媒体元素 */
+        #fullscreen-container img, #fullscreen-container video {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0;
+            transition: opacity 1s ease-in-out;
+        }
+        
+        /* 激活（当前显示）媒体添加 active 类，令其淡入显示 */
+        #fullscreen-container img.active, #fullscreen-container video.active {
+            opacity: 1;
+        }
 
         /*
             面板内的图片与视频采用绝对定位 + 宽高 100%，
@@ -92,6 +124,10 @@
         <div class="slideshow-panel" id="panel-center"></div>
         <div class="slideshow-panel" id="panel-right"></div>
     </div>
+    
+    <!-- 全屏布局容器 -->
+    <div id="fullscreen-container" class="fullscreen-layout hidden">
+    </div>
 
     <!--
         下方脚本：
@@ -101,20 +137,33 @@
     -->
     <script>
         // ===================== 基础数据 =====================
-        // 用于存储媒体文件名（图片或视频），由 list.json 返回，例如：["a.jpg","b.png","c.mp4"]
-        let images = [];
+        // 用于存储媒体文件信息（包含尺寸和方向），由 list.json 返回
+        let mediaList = [];
+        
+        // 当前布局模式 ('split' 或 'fullscreen')
+        let currentLayout = 'split';
+        
+        // 存储面板循环的定时器ID，用于暂停/恢复
+        let panelTimers = new Map();
+        
+        // 全屏容器的媒体数据
+        let fullscreenMediaData = {
+            currentIndex: -1,
+            isPlayingVideo: false,
+            mediaElement: null
+        };
 
         // ===================== 载入媒体列表 =====================
         // fetch('./media/list.json'): 向同目录下 media 文件夹请求 list.json
-        // list.json 需是一个纯数组 JSON，例如: ["1.jpg","2.mp4"]
+        // list.json 现在是一个包含媒体信息的对象数组
         fetch('./media/list.json')
             .then(response => response.json())
             .then(data => {
-                images = data;
+                mediaList = data;
                 initSlideshow(); // 列表拉取成功后开始初始化
             })
             .catch(error => {
-                console.error('Error loading image list:', error);
+                console.error('Error loading media list:', error);
             });
 
         // ===================== 初始化入口 =====================
@@ -124,10 +173,10 @@
          * 注意: startIndex 只是初始显示顺序，后续播放采用随机选择。
          */
         function initSlideshow() {
-            if (images.length === 0) return; // 没有媒体则不处理
+            if (mediaList.length === 0) return; // 没有媒体则不处理
 
             // 生成三个不重复的随机索引
-            const randomIndices = getRandomIndices(3, images.length);
+            const randomIndices = getRandomIndices(3, mediaList.length);
             
             // 初始化三个面板（起始索引现在是随机的）
             initPanel('panel-left', randomIndices[0]);
@@ -271,8 +320,21 @@
          */
         function displayMedia(panel, index) {
             const panelData = panel.panelData;
-            const filename = images[index];
+            const mediaInfo = mediaList[index];
+            const filename = mediaInfo.filename;
             if (!filename) return;
+
+            // 检查是否需要切换布局
+            if (mediaInfo.orientation === 'landscape') {
+                // 横屏媒体，切换到全屏布局
+                switchToFullscreenLayout(index);
+                return;
+            }
+
+            // 竖屏媒体，保持三栏布局
+            if (currentLayout !== 'split') {
+                switchToSplitLayout();
+            }
 
             // 创建新的媒体元素
             const newMediaElement = createMediaElement(filename);
@@ -299,7 +361,9 @@
                     // 播放完自动切换
                     panelData.mediaElement.onended = function() {
                         panelData.isPlayingVideo = false;
-                        nextMedia(panel);
+                        if (currentLayout === 'split') {
+                            nextMedia(panel);
+                        }
                     };
 
                     // 尝试播放（有可能被浏览器策略拦截，已静音一般不会）
@@ -307,7 +371,9 @@
                         console.error('Video play error:', e);
                         // 播放失败当作图片一样直接换下一个
                         panelData.isPlayingVideo = false;
-                        nextMedia(panel);
+                        if (currentLayout === 'split') {
+                            nextMedia(panel);
+                        }
                     });
                 }
             }).catch(() => {
@@ -316,8 +382,162 @@
                     panel.removeChild(panelData.mediaElement);
                     panelData.mediaElement = null;
                 }
-                nextMedia(panel);
+                if (currentLayout === 'split') {
+                    nextMedia(panel);
+                }
             });
+        }
+
+        // ===================== 布局切换函数 =====================
+        /**
+         * switchToFullscreenLayout(index)
+         * @param {number} index - 媒体索引
+         * 说明: 切换到全屏布局并显示指定媒体
+         */
+        function switchToFullscreenLayout(index) {
+            // 清除所有面板的定时器
+            for (const [panelId, timerId] of panelTimers) {
+                clearTimeout(timerId);
+            }
+            panelTimers.clear();
+            
+            // 隐藏三栏布局
+            const splitContainer = document.getElementById('slideshow-container');
+            splitContainer.classList.add('hidden');
+            
+            // 显示全屏布局
+            const fullscreenContainer = document.getElementById('fullscreen-container');
+            fullscreenContainer.classList.remove('hidden');
+            
+            // 更新布局状态
+            currentLayout = 'fullscreen';
+            
+            // 显示媒体
+            displayFullscreenMedia(index);
+        }
+        
+        /**
+         * switchToSplitLayout()
+         * 说明: 切换到三栏布局
+         */
+        function switchToSplitLayout() {
+            // 隐藏全屏布局
+            document.getElementById('fullscreen-container').classList.add('hidden');
+            
+            // 显示三栏布局
+            document.getElementById('slideshow-container').classList.remove('hidden');
+            
+            // 更新布局状态
+            currentLayout = 'split';
+            
+            // 重新启动所有面板的循环
+            const panels = ['panel-left', 'panel-center', 'panel-right'];
+            for (const panelId of panels) {
+                const panel = document.getElementById(panelId);
+                if (panel && panel.panelData) {
+                    startPanelLoop(panel);
+                }
+            }
+        }
+        
+        /**
+         * displayFullscreenMedia(index)
+         * @param {number} index - 媒体索引
+         * 说明: 在全屏布局中显示媒体
+         */
+        function displayFullscreenMedia(index) {
+            const mediaInfo = mediaList[index];
+            const filename = mediaInfo.filename;
+            if (!filename) return;
+            
+            const fullscreenContainer = document.getElementById('fullscreen-container');
+            
+            // 更新全屏媒体数据
+            fullscreenMediaData.currentIndex = index;
+            
+            // 创建新的媒体元素
+            const newMediaElement = createMediaElement(filename);
+            newMediaElement.alt = 'Slideshow Media';
+            
+            // 移除旧元素
+            if (fullscreenMediaData.mediaElement) {
+                fullscreenContainer.removeChild(fullscreenMediaData.mediaElement);
+            }
+            
+            // 记录并添加到 DOM
+            fullscreenMediaData.mediaElement = newMediaElement;
+            fullscreenContainer.appendChild(fullscreenMediaData.mediaElement);
+            
+            // 加载文件
+            loadMedia(fullscreenMediaData.mediaElement, filename).then(() => {
+                // 加载成功，显示（淡入）
+                fullscreenMediaData.mediaElement.classList.add('active');
+                
+                // 视频处理
+                if (fullscreenMediaData.mediaElement.tagName === 'VIDEO') {
+                    fullscreenMediaData.isPlayingVideo = true;
+                    
+                    // 播放完自动切换
+                    fullscreenMediaData.mediaElement.onended = function() {
+                        fullscreenMediaData.isPlayingVideo = false;
+                        nextFullscreenMedia();
+                    };
+                    
+                    // 尝试播放
+                    fullscreenMediaData.mediaElement.play().catch(e => {
+                        console.error('Video play error:', e);
+                        fullscreenMediaData.isPlayingVideo = false;
+                        nextFullscreenMedia();
+                    });
+                } else {
+                    // 图片处理，设置定时器
+                    setTimeout(() => {
+                        if (!fullscreenMediaData.isPlayingVideo) {
+                            nextFullscreenMedia();
+                        }
+                    }, Math.floor(Math.random() * 6 + 5) * 1000); // 5-10秒随机间隔
+                }
+            }).catch(() => {
+                // 加载失败，尝试下一个
+                if (fullscreenMediaData.mediaElement) {
+                    fullscreenContainer.removeChild(fullscreenMediaData.mediaElement);
+                    fullscreenMediaData.mediaElement = null;
+                }
+                nextFullscreenMedia();
+            });
+        }
+        
+        /**
+         * nextFullscreenMedia()
+         * 说明: 切换到下一个全屏媒体
+         */
+        function nextFullscreenMedia() {
+            if (mediaList.length === 0) return;
+            
+            // 随机选取下一个索引（避免与当前相同，除非只有一个媒体）
+            let nextIndex;
+            do {
+                nextIndex = Math.floor(Math.random() * mediaList.length);
+            } while (nextIndex === fullscreenMediaData.currentIndex && mediaList.length > 1);
+            
+            // 检查下一个媒体的方向
+            const nextMediaInfo = mediaList[nextIndex];
+            if (nextMediaInfo.orientation === 'landscape') {
+                // 仍然是横屏，继续全屏布局
+                displayFullscreenMedia(nextIndex);
+            } else {
+                // 竖屏媒体，切换回三栏布局
+                switchToSplitLayout();
+                
+                // 在三栏布局中随机选择一个面板显示这个竖屏媒体
+                const panels = ['panel-left', 'panel-center', 'panel-right'];
+                const randomPanelId = panels[Math.floor(Math.random() * panels.length)];
+                const panel = document.getElementById(randomPanelId);
+                if (panel && panel.panelData) {
+                    panel.panelData.currentIndex = nextIndex;
+                    displayMedia(panel, nextIndex);
+                }
+            }
         }
 
         // ===================== 切换到下一个媒体 =====================
@@ -332,8 +552,8 @@
             // 随机选取下一个索引（避免与当前相同，除非只有一个媒体）
             let nextIndex;
             do {
-                nextIndex = Math.floor(Math.random() * images.length);
-            } while (nextIndex === panelData.currentIndex && images.length > 1);
+                nextIndex = Math.floor(Math.random() * mediaList.length);
+            } while (nextIndex === panelData.currentIndex && mediaList.length > 1);
 
             panelData.currentIndex = nextIndex;
             displayMedia(panel, panelData.currentIndex);
@@ -352,14 +572,19 @@
             // 随机间隔（秒）[5,10]
             const interval = Math.floor(Math.random() * 6) + 5; // 5-10秒
 
-            setTimeout(() => {
+            const timerId = setTimeout(() => {
                 // 如果当前没有视频在播放，执行切换
-                if (!panelData.isPlayingVideo) {
+                if (!panelData.isPlayingVideo && currentLayout === 'split') {
                     nextMedia(panel);
                 }
                 // 递归继续循环
-                startPanelLoop(panel);
+                if (currentLayout === 'split') {
+                    startPanelLoop(panel);
+                }
             }, interval * 1000);
+            
+            // 存储定时器ID
+            panelTimers.set(panel.id, timerId);
         }
     </script>
 </body>
