@@ -14,31 +14,25 @@
   在被扫描根目录下写入 list.json (覆盖写)。
   现在的 JSON 结构为: 列表(List) 里每个元素是一个对象(Object)，字段:
     filename     相对根目录的 POSIX 风格路径 (字符串)
-    width        宽度 (整数) 或 null (未知)
-    height       高度 (整数) 或 null (未知)
-    orientation  "landscape" | "portrait" | "square" | "unknown"
+    orientation  "landscape" | "portrait" | "square" | "unknown" （不再输出 width/height 字段）
 
 示例:
   [
     {
       "filename": "videos/sample.mp4",
-      "width": 1920,
-      "height": 1080,
       "orientation": "landscape"
     },
     {
       "filename": "images/picture.jpg",
-      "width": 1080,
-      "height": 1920,
       "orientation": "portrait"
     }
   ]
 
 说明:
-  * 分辨率获取: 图片优先使用 Pillow (可选依赖), 视频优先使用 ffprobe (若可用)。
-  * 如果缺失依赖或获取失败, width/height 为 null, orientation 为 "unknown"。
-  * orientation 逻辑: 若宽高都已知 => 宽>高:landscape, 高>宽:portrait, 相等:square。
-  * 若你仍需旧版本的纯字符串数组输出, 请回退到历史版本或自行调整 build_list()。
+  * 分辨率内部仍会尝试获取(图片 Pillow 或后备解析 / 视频 ffprobe), 仅用于推断 orientation, 但最终 JSON 不再包含 width/height 字段。
+  * 若无法获取尺寸则 orientation 为 "unknown"。
+  * orientation 逻辑: 宽>高:landscape, 高>宽:portrait, 相等:square, 任一未知:unknown。
+  * 若你仍需包含 width/height 的版本, 请回退到历史版本或自行修改 get_media_metadata()。
 """
 from __future__ import annotations
 
@@ -244,7 +238,8 @@ def infer_orientation(width: Optional[int], height: Optional[int]) -> str:
         return 'landscape'
     if height > width:
         return 'portrait'
-    return 'square'
+    return 'portrait' # 方形图按照竖图处理
+    # return 'square'
 
 
 def get_media_metadata(path: Path, root: Path) -> dict[str, Any]:
@@ -264,8 +259,6 @@ def get_media_metadata(path: Path, root: Path) -> dict[str, Any]:
     orientation = infer_orientation(width, height)
     return {
         'filename': rel,
-        'width': width,
-        'height': height,
         'orientation': orientation,
     }
 
@@ -321,10 +314,6 @@ def main(argv: list[str]) -> int:
 
     items = build_list(root, follow_symlinks=args.follow_symlinks)
     write_json(root, items)
-
-    # 如果大量图片缺失尺寸且 Pillow 未安装，给出提示
-    if Image is None and any(i['width'] is None and i['height'] is None and i['filename'].lower().split('.')[-1] in IMAGE_EXTS for i in items):
-        print("提示: 部分图片未能解析尺寸, 建议安装 Pillow: pip install Pillow", file=sys.stderr)
 
     print(f"Found {len(items)} media files. Written to {root / 'list.json'}")
     return 0
