@@ -595,7 +595,7 @@
                         if (!fullscreenMediaData.isPlayingVideo) {
                             nextFullscreenMedia();
                         }
-                    }, Math.floor(Math.random() * 6 + 5) * 1000); // 5-10秒随机间隔
+                    }, Math.floor(Math.random() * 60 + 60) * 1000); // 5-10秒随机间隔
                 }
             }).catch(() => {
                 // 加载失败，尝试下一个
@@ -772,7 +772,7 @@
             const panelData = panel.panelData;
 
             // 随机间隔（秒）[5,10]
-            const interval = Math.floor(Math.random() * 6) + 5; // 5-10秒
+            const interval = Math.floor(Math.random() * 60) + 60; // 5-10秒
 
             const timerId = setTimeout(() => {
                 // 如果当前没有视频在播放，执行切换
