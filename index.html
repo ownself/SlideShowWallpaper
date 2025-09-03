@@ -51,7 +51,7 @@
             position: relative;
             overflow: hidden;
         }
-        
+
         /* 全屏布局容器 */
         #fullscreen-container {
             width: 100%;
@@ -63,12 +63,12 @@
             background-color: #000;
             z-index: 1000;
         }
-        
+
         /* 隐藏类 */
         .hidden {
             display: none;
         }
-        
+
         /* 全屏布局下的媒体元素 */
         #fullscreen-container img, #fullscreen-container video {
             position: absolute;
@@ -78,7 +78,7 @@
             opacity: 0;
             transition: opacity 1s ease-in-out;
         }
-        
+
         /* 激活（当前显示）媒体添加 active 类，令其淡入显示 */
         #fullscreen-container img.active, #fullscreen-container video.active {
             opacity: 1;
@@ -124,7 +124,7 @@
         <div class="slideshow-panel" id="panel-center"></div>
         <div class="slideshow-panel" id="panel-right"></div>
     </div>
-    
+
     <!-- 全屏布局容器 -->
     <div id="fullscreen-container" class="fullscreen-layout hidden">
     </div>
@@ -139,19 +139,28 @@
         // ===================== 基础数据 =====================
         // 用于存储媒体文件信息（包含尺寸和方向），由 list.json 返回
         let mediaList = [];
-        
+
         // 当前布局模式 ('split' 或 'fullscreen')
         let currentLayout = 'split';
-        
+
         // 存储面板循环的定时器ID，用于暂停/恢复
         let panelTimers = new Map();
-        
+
         // 全屏容器的媒体数据
         let fullscreenMediaData = {
             currentIndex: -1,
             isPlayingVideo: false,
             mediaElement: null
         };
+
+        // 打乱后的资源序列，用于顺序播放
+        let shuffledMediaList = [];
+
+        // 全局下一个资源索引，确保不重复使用
+        let nextGlobalIndex = 0;
+
+        // 每个面板的当前播放索引
+        let panelIndices = new Map();
 
         // ===================== 载入媒体列表 =====================
         // fetch('./media/list.json'): 向同目录下 media 文件夹请求 list.json
@@ -170,18 +179,105 @@
         /**
          * initSlideshow
          * 说明: 若成功获取媒体列表，为三个面板分别按不同起始索引初始化。
-         * 注意: startIndex 只是初始显示顺序，后续播放采用随机选择。
+         * 注意: startIndex 只是初始显示顺序，后续播放采用顺序选择（基于打乱的序列）。
          */
         function initSlideshow() {
             if (mediaList.length === 0) return; // 没有媒体则不处理
 
-            // 生成三个不重复的随机索引
-            const randomIndices = getRandomIndices(3, mediaList.length);
-            
-            // 初始化三个面板（起始索引现在是随机的）
-            initPanel('panel-left', randomIndices[0]);
-            initPanel('panel-center', randomIndices[1]);
-            initPanel('panel-right', randomIndices[2]);
+            // 创建重新排列的资源序列（确保portrait资源至少3个连续）
+            shuffledMediaList = rearrangeMediaList(mediaList);
+
+            // 初始化全局索引
+            nextGlobalIndex = 3; // 前3个资源用于初始化三个面板
+
+            // 为三个面板分配不同的初始资源索引（使用重新排列序列中的前3个资源）
+            panelIndices.set('panel-left', 0);
+            panelIndices.set('panel-center', 1);
+            panelIndices.set('panel-right', 2);
+
+            // 初始化三个面板
+            initPanel('panel-left', panelIndices.get('panel-left'));
+            initPanel('panel-center', panelIndices.get('panel-center'));
+            initPanel('panel-right', panelIndices.get('panel-right'));
+        }
+
+        // ===================== 数组打乱函数 =====================
+        /**
+         * shuffleArray(array)
+         * @param {Array} array - 需要打乱的数组
+         * @returns {Array} 打乱后的数组
+         * 说明: 使用 Fisher-Yates 算法打乱数组
+         */
+        function shuffleArray(array) {
+            const newArray = [...array]; // 创建副本
+            for (let i = newArray.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+            }
+            return newArray;
+        }
+
+        // ===================== 重新排列媒体列表以确保portrait资源至少3个连续 =====================
+        /**
+         * rearrangeMediaList(mediaList)
+         * @param {Array} mediaList - 媒体列表
+         * @returns {Array} 重新排列后的媒体列表
+         * 说明: 确保portrait资源至少以3个为一组连续排列
+         */
+        function rearrangeMediaList(mediaList) {
+            // 分离portrait和landscape资源
+            const portraits = mediaList.filter(media => media.orientation === 'portrait');
+            const landscapes = mediaList.filter(media => media.orientation === 'landscape');
+
+            // 如果portrait资源少于3个，直接返回打乱的列表
+            if (portraits.length < 3) {
+                return shuffleArray(mediaList);
+            }
+
+            // 打乱两个列表
+            const shuffledPortraits = shuffleArray(portraits);
+            const shuffledLandscapes = shuffleArray(landscapes);
+
+            // 创建结果列表
+            const result = [];
+
+            // 初始化索引
+            let portraitIndex = 0;
+            let landscapeIndex = 0;
+
+            // 按组处理资源，确保portrait至少3个连续
+            while (portraitIndex < shuffledPortraits.length || landscapeIndex < shuffledLandscapes.length) {
+                // 计算剩余的portrait资源
+                const remainingPortraits = shuffledPortraits.length - portraitIndex;
+
+                // 如果剩余的portrait资源少于3个，将它们与前面的资源组合
+                if (remainingPortraits > 0 && remainingPortraits < 3 && result.length > 0) {
+                    // 添加剩余的所有portrait资源到当前组
+                    for (let i = 0; i < remainingPortraits; i++) {
+                        result.push(shuffledPortraits[portraitIndex++]);
+                    }
+                } else if (remainingPortraits >= 3) {
+                    // 添加3个portrait资源
+                    for (let i = 0; i < 3 && portraitIndex < shuffledPortraits.length; i++) {
+                        result.push(shuffledPortraits[portraitIndex++]);
+                    }
+                    // 添加1个landscape资源（如果还有）
+                    if (landscapeIndex < shuffledLandscapes.length) {
+                        result.push(shuffledLandscapes[landscapeIndex++]);
+                    }
+                } else {
+                    // 处理剩余的情况（portrait资源少于3个且结果列表为空，或者没有更多portrait资源）
+                    if (landscapeIndex < shuffledLandscapes.length) {
+                        result.push(shuffledLandscapes[landscapeIndex++]);
+                    }
+                    // 如果还有portrait资源，将它们添加到结果中
+                    while (portraitIndex < shuffledPortraits.length) {
+                        result.push(shuffledPortraits[portraitIndex++]);
+                    }
+                }
+            }
+
+            return result;
         }
 
         // ===================== 随机索引生成 =====================
@@ -197,20 +293,20 @@
                 // 如果需要的索引数量大于最大值，则返回顺序索引
                 return Array.from({length: count}, (_, i) => i % max);
             }
-            
+
             const indices = [];
             const used = new Set();
-            
+
             for (let i = 0; i < count; i++) {
                 let randomIndex;
                 do {
                     randomIndex = Math.floor(Math.random() * max);
                 } while (used.has(randomIndex) && used.size < max);
-                
+
                 indices.push(randomIndex);
                 used.add(randomIndex);
             }
-            
+
             return indices;
         }
 
@@ -223,6 +319,7 @@
          */
         function initPanel(panelId, startIndex) {
             const panel = document.getElementById(panelId);
+
             const panelData = {
                 currentIndex: startIndex,      // 当前正在展示的媒体索引
                 isPlayingVideo: false,         // 是否正在播放视频（用于控制定时切换）
@@ -320,14 +417,17 @@
          */
         function displayMedia(panel, index) {
             const panelData = panel.panelData;
-            const mediaInfo = mediaList[index];
+            // 使用重新排列后的资源列表
+            const mediaInfo = shuffledMediaList[index];
             const filename = mediaInfo.filename;
             if (!filename) return;
 
             // 检查是否需要切换布局
             if (mediaInfo.orientation === 'landscape') {
                 // 横屏媒体，切换到全屏布局
-                switchToFullscreenLayout(index);
+                // 需要找到在原始列表中的索引
+                const originalIndex = mediaList.findIndex(item => item.filename === mediaInfo.filename);
+                switchToFullscreenLayout(originalIndex);
                 return;
             }
 
@@ -400,22 +500,22 @@
                 clearTimeout(timerId);
             }
             panelTimers.clear();
-            
+
             // 隐藏三栏布局
             const splitContainer = document.getElementById('slideshow-container');
             splitContainer.classList.add('hidden');
-            
+
             // 显示全屏布局
             const fullscreenContainer = document.getElementById('fullscreen-container');
             fullscreenContainer.classList.remove('hidden');
-            
+
             // 更新布局状态
             currentLayout = 'fullscreen';
-            
+
             // 显示媒体
             displayFullscreenMedia(index);
         }
-        
+
         /**
          * switchToSplitLayout()
          * 说明: 切换到三栏布局
@@ -423,13 +523,13 @@
         function switchToSplitLayout() {
             // 隐藏全屏布局
             document.getElementById('fullscreen-container').classList.add('hidden');
-            
+
             // 显示三栏布局
             document.getElementById('slideshow-container').classList.remove('hidden');
-            
+
             // 更新布局状态
             currentLayout = 'split';
-            
+
             // 重新启动所有面板的循环
             const panels = ['panel-left', 'panel-center', 'panel-right'];
             for (const panelId of panels) {
@@ -439,7 +539,7 @@
                 }
             }
         }
-        
+
         /**
          * displayFullscreenMedia(index)
          * @param {number} index - 媒体索引
@@ -449,40 +549,40 @@
             const mediaInfo = mediaList[index];
             const filename = mediaInfo.filename;
             if (!filename) return;
-            
+
             const fullscreenContainer = document.getElementById('fullscreen-container');
-            
+
             // 更新全屏媒体数据
             fullscreenMediaData.currentIndex = index;
-            
+
             // 创建新的媒体元素
             const newMediaElement = createMediaElement(filename);
             newMediaElement.alt = 'Slideshow Media';
-            
+
             // 移除旧元素
             if (fullscreenMediaData.mediaElement) {
                 fullscreenContainer.removeChild(fullscreenMediaData.mediaElement);
             }
-            
+
             // 记录并添加到 DOM
             fullscreenMediaData.mediaElement = newMediaElement;
             fullscreenContainer.appendChild(fullscreenMediaData.mediaElement);
-            
+
             // 加载文件
             loadMedia(fullscreenMediaData.mediaElement, filename).then(() => {
                 // 加载成功，显示（淡入）
                 fullscreenMediaData.mediaElement.classList.add('active');
-                
+
                 // 视频处理
                 if (fullscreenMediaData.mediaElement.tagName === 'VIDEO') {
                     fullscreenMediaData.isPlayingVideo = true;
-                    
+
                     // 播放完自动切换
                     fullscreenMediaData.mediaElement.onended = function() {
                         fullscreenMediaData.isPlayingVideo = false;
                         nextFullscreenMedia();
                     };
-                    
+
                     // 尝试播放
                     fullscreenMediaData.mediaElement.play().catch(e => {
                         console.error('Video play error:', e);
@@ -506,56 +606,158 @@
                 nextFullscreenMedia();
             });
         }
-        
+
         /**
          * nextFullscreenMedia()
          * 说明: 切换到下一个全屏媒体
          */
         function nextFullscreenMedia() {
             if (mediaList.length === 0) return;
-            
-            // 随机选取下一个索引（避免与当前相同，除非只有一个媒体）
-            let nextIndex;
-            do {
-                nextIndex = Math.floor(Math.random() * mediaList.length);
-            } while (nextIndex === fullscreenMediaData.currentIndex && mediaList.length > 1);
-            
-            // 检查下一个媒体的方向
-            const nextMediaInfo = mediaList[nextIndex];
+
+            // 获取全局下一个索引
+            let nextIndex = nextGlobalIndex++;
+
+            // 检查是否需要重新打乱序列（当索引超过一定倍数时）
+            if (nextIndex >= shuffledMediaList.length * 3) {
+                // 重新打乱序列
+                shuffledMediaList = rearrangeMediaList(mediaList);
+                // 重置全局索引
+                nextGlobalIndex = 0;
+                nextIndex = nextGlobalIndex++;
+            }
+
+            // 确保索引在范围内
+            nextIndex = nextIndex % shuffledMediaList.length;
+
+            // 从打乱的序列中找到下一个媒体在原始列表中的索引
+            const nextMediaInfo = shuffledMediaList[nextIndex];
+            const originalIndex = mediaList.findIndex(item => item.filename === nextMediaInfo.filename);
+
+            // 更新全屏媒体数据的当前索引
+            fullscreenMediaData.currentIndex = originalIndex;
+
             if (nextMediaInfo.orientation === 'landscape') {
                 // 仍然是横屏，继续全屏布局
-                displayFullscreenMedia(nextIndex);
+                displayFullscreenMedia(originalIndex);
             } else {
                 // 竖屏媒体，切换回三栏布局
                 switchToSplitLayout();
-                
-                // 在三栏布局中随机选择一个面板显示这个竖屏媒体
+
+                // 在三栏布局中选择一个面板显示这个竖屏媒体
+                // 使用循环方式选择面板，确保每个面板都有机会显示
                 const panels = ['panel-left', 'panel-center', 'panel-right'];
-                const randomPanelId = panels[Math.floor(Math.random() * panels.length)];
-                const panel = document.getElementById(randomPanelId);
+                // 简单的轮询方式选择面板
+                const panelCycleIndex = Math.floor(Date.now() / 1000) % 3;
+                const panelId = panels[panelCycleIndex];
+                const panel = document.getElementById(panelId);
                 if (panel && panel.panelData) {
-                    panel.panelData.currentIndex = nextIndex;
-                    displayMedia(panel, nextIndex);
+                    // 更新面板索引
+                    panelIndices.set(panelId, nextIndex);
+                    panel.panelData.currentIndex = originalIndex;
+                    // 直接显示媒体，不通过displayMedia函数以避免再次触发布局切换
+                    showMedia(panel, originalIndex);
                 }
             }
+        }
+
+        /**
+         * showMedia(panel, index)
+         * @param {HTMLElement} panel - 面板元素
+         * @param {number} index - 要显示的媒体索引
+         * 说明: 直接显示指定媒体，不检查布局切换
+         */
+        function showMedia(panel, index) {
+            const panelData = panel.panelData;
+            // 使用重新排列后的资源列表
+            const mediaInfo = shuffledMediaList[index];
+            const filename = mediaInfo.filename;
+            if (!filename) return;
+
+            // 创建新的媒体元素
+            const newMediaElement = createMediaElement(filename);
+            newMediaElement.alt = 'Slideshow Media'; // 若为图片，提供基本替代文本
+
+            // 移除旧元素（直接删除，无淡出动画；可按需扩展）
+            if (panelData.mediaElement) {
+                panel.removeChild(panelData.mediaElement);
+            }
+
+            // 记录并添加到 DOM
+            panelData.mediaElement = newMediaElement;
+            panel.appendChild(panelData.mediaElement);
+
+            // 加载文件
+            loadMedia(panelData.mediaElement, filename).then(() => {
+                // 加载成功，显示（淡入）
+                panelData.mediaElement.classList.add('active');
+
+                // 视频处理
+                if (panelData.mediaElement.tagName === 'VIDEO') {
+                    panelData.isPlayingVideo = true; // 标记正在播放
+
+                    // 播放完自动切换
+                    panelData.mediaElement.onended = function() {
+                        panelData.isPlayingVideo = false;
+                        if (currentLayout === 'split') {
+                            nextMedia(panel);
+                        }
+                    };
+
+                    // 尝试播放（有可能被浏览器策略拦截，已静音一般不会）
+                    panelData.mediaElement.play().catch(e => {
+                        console.error('Video play error:', e);
+                        // 播放失败当作图片一样直接换下一个
+                        panelData.isPlayingVideo = false;
+                        if (currentLayout === 'split') {
+                            nextMedia(panel);
+                        }
+                    });
+                }
+            }).catch(() => {
+                // 加载失败：移除占位并尝试下一个
+                if (panelData.mediaElement) {
+                    panel.removeChild(panelData.mediaElement);
+                    panelData.mediaElement = null;
+                }
+                if (currentLayout === 'split') {
+                    nextMedia(panel);
+                }
+            });
         }
 
         // ===================== 切换到下一个媒体 =====================
         /**
          * nextMedia(panel)
          * @param {HTMLElement} panel - 面板元素
-         * 说明: 随机选取一个不同于当前索引的媒体，更新并显示。
+         * 说明: 按顺序选取下一个媒体（基于打乱的序列），更新并显示。
          */
         function nextMedia(panel) {
             const panelData = panel.panelData;
+            const panelId = panel.id;
 
-            // 随机选取下一个索引（避免与当前相同，除非只有一个媒体）
-            let nextIndex;
-            do {
-                nextIndex = Math.floor(Math.random() * mediaList.length);
-            } while (nextIndex === panelData.currentIndex && mediaList.length > 1);
+            // 获取全局下一个索引
+            let nextIndex = nextGlobalIndex++;
 
-            panelData.currentIndex = nextIndex;
+            // 检查是否需要重新打乱序列（当索引超过一定倍数时）
+            if (nextIndex >= shuffledMediaList.length * 3) {
+                // 重新打乱序列
+                shuffledMediaList = rearrangeMediaList(mediaList);
+                // 重置全局索引
+                nextGlobalIndex = 0;
+                nextIndex = nextGlobalIndex++;
+            }
+
+            // 确保索引在范围内
+            nextIndex = nextIndex % shuffledMediaList.length;
+
+            // 更新面板索引
+            panelIndices.set(panelId, nextIndex);
+
+            // 从原始媒体列表中找到对应的索引
+            const mediaInfo = shuffledMediaList[nextIndex];
+            const originalIndex = mediaList.findIndex(item => item.filename === mediaInfo.filename);
+
+            panelData.currentIndex = originalIndex;
             displayMedia(panel, panelData.currentIndex);
         }
 
@@ -582,7 +784,7 @@
                     startPanelLoop(panel);
                 }
             }, interval * 1000);
-            
+
             // 存储定时器ID
             panelTimers.set(panel.id, timerId);
         }
