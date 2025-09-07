@@ -348,6 +348,38 @@
             return videoExtensions.some(ext => filename.toLowerCase().endsWith(ext));
         }
 
+        // ===================== 资源清理函数 =====================
+        /**
+         * cleanupMediaElement(mediaElement)
+         * @param {HTMLElement} mediaElement - 要清理的媒体元素
+         * 说明: 完全清理媒体元素，释放所有资源和事件监听器
+         */
+        function cleanupMediaElement(mediaElement) {
+            if (!mediaElement) return;
+
+            if (mediaElement.tagName === 'VIDEO') {
+                // 暂停视频播放
+                if (!mediaElement.paused) {
+                    mediaElement.pause();
+                }
+                // 清空视频源
+                mediaElement.src = '';
+                mediaElement.load(); // 重置video元素状态
+                // 移除所有事件监听器
+                mediaElement.onloadeddata = null;
+                mediaElement.onerror = null;
+                mediaElement.onended = null;
+            } else if (mediaElement.tagName === 'IMG') {
+                // 清空图片源
+                mediaElement.src = '';
+                mediaElement.onload = null;
+                mediaElement.onerror = null;
+            }
+
+            // 清除所有样式类
+            mediaElement.className = '';
+        }
+
         // ===================== 创建媒体元素 =====================
         /**
          * createMediaElement(filename)
@@ -440,8 +472,9 @@
             const newMediaElement = createMediaElement(filename);
             newMediaElement.alt = 'Slideshow Media'; // 若为图片，提供基本替代文本
 
-            // 移除旧元素（直接删除，无淡出动画；可按需扩展）
+            // 移除旧元素并清理资源
             if (panelData.mediaElement) {
+                cleanupMediaElement(panelData.mediaElement);
                 panel.removeChild(panelData.mediaElement);
             }
 
@@ -477,8 +510,9 @@
                     });
                 }
             }).catch(() => {
-                // 加载失败：移除占位并尝试下一个
+                // 加载失败：清理资源并尝试下一个
                 if (panelData.mediaElement) {
+                    cleanupMediaElement(panelData.mediaElement);
                     panel.removeChild(panelData.mediaElement);
                     panelData.mediaElement = null;
                 }
@@ -559,8 +593,9 @@
             const newMediaElement = createMediaElement(filename);
             newMediaElement.alt = 'Slideshow Media';
 
-            // 移除旧元素
+            // 移除旧元素并清理资源
             if (fullscreenMediaData.mediaElement) {
+                cleanupMediaElement(fullscreenMediaData.mediaElement);
                 fullscreenContainer.removeChild(fullscreenMediaData.mediaElement);
             }
 
@@ -595,11 +630,12 @@
                         if (!fullscreenMediaData.isPlayingVideo) {
                             nextFullscreenMedia();
                         }
-                    }, Math.floor(Math.random() * 60 + 60) * 1000); // 5-10秒随机间隔
+                    }, Math.floor(Math.random() * 60 + 60) * 1000); // 60-120秒随机间隔
                 }
             }).catch(() => {
-                // 加载失败，尝试下一个
+                // 加载失败，清理资源并尝试下一个
                 if (fullscreenMediaData.mediaElement) {
+                    cleanupMediaElement(fullscreenMediaData.mediaElement);
                     fullscreenContainer.removeChild(fullscreenMediaData.mediaElement);
                     fullscreenMediaData.mediaElement = null;
                 }
@@ -677,8 +713,9 @@
             const newMediaElement = createMediaElement(filename);
             newMediaElement.alt = 'Slideshow Media'; // 若为图片，提供基本替代文本
 
-            // 移除旧元素（直接删除，无淡出动画；可按需扩展）
+            // 移除旧元素并清理资源
             if (panelData.mediaElement) {
+                cleanupMediaElement(panelData.mediaElement);
                 panel.removeChild(panelData.mediaElement);
             }
 
@@ -714,8 +751,9 @@
                     });
                 }
             }).catch(() => {
-                // 加载失败：移除占位并尝试下一个
+                // 加载失败：清理资源并尝试下一个
                 if (panelData.mediaElement) {
+                    cleanupMediaElement(panelData.mediaElement);
                     panel.removeChild(panelData.mediaElement);
                     panelData.mediaElement = null;
                 }
@@ -772,7 +810,7 @@
             const panelData = panel.panelData;
 
             // 随机间隔（秒）[5,10]
-            const interval = Math.floor(Math.random() * 60) + 60; // 5-10秒
+            const interval = Math.floor(Math.random() * 60) + 60; // 60-120秒
 
             const timerId = setTimeout(() => {
                 // 如果当前没有视频在播放，执行切换
