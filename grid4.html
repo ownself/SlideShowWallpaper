@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grid Wallpaper Player</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: #000;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+        
+        .grid-container {
+            width: 100vw;
+            height: 100vh;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr 1fr;
+            gap: 2px;
+        }
+        
+        .video-cell {
+            position: relative;
+            background: #111;
+            overflow: hidden;
+        }
+        
+        .video-player {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            background: #000;
+        }
+        
+        .video-info {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        
+        .video-cell:hover .video-info {
+            opacity: 1;
+        }
+        
+        .loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 20px;
+            z-index: 1000;
+        }
+        
+        .error {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            color: #ff6b6b;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px 15px;
+            border-radius: 5px;
+            z-index: 1000;
+            max-width: 400px;
+        }
+    </style>
+</head>
+<body>
+    <div class="loading" id="loading">正在加载媒体文件...</div>
+    
+    
+    <div class="grid-container" id="gridContainer">
+        <div class="video-cell" id="cell0">
+            <video class="video-player" id="video0" muted loop></video>
+            <div class="video-info" id="info0"></div>
+        </div>
+        <div class="video-cell" id="cell1">
+            <video class="video-player" id="video1" muted loop></video>
+            <div class="video-info" id="info1"></div>
+        </div>
+        <div class="video-cell" id="cell2">
+            <video class="video-player" id="video2" muted loop></video>
+            <div class="video-info" id="info2"></div>
+        </div>
+        <div class="video-cell" id="cell3">
+            <video class="video-player" id="video3" muted loop></video>
+            <div class="video-info" id="info3"></div>
+        </div>
+    </div>
+
+    <script>
+        class WallpaperPlayer {
+            constructor() {
+                this.mediaData = {};
+                this.videoQueue = [];
+                this.currentIndex = 0;
+                this.players = [];
+                this.isPlaying = false;
+                
+                this.init();
+            }
+            
+            async init() {
+                try {
+                    await this.loadMediaData();
+                    this.setupPlayers();
+                    this.shuffleQueue();
+                    this.startPlayback();
+                    this.hideLoading();
+                } catch (error) {
+                    this.showError('初始化失败: ' + error.message);
+                }
+            }
+            
+            async loadMediaData() {
+                try {
+                    const response = await fetch('./video.json');
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    this.mediaData = await response.json();
+                    
+                    // 转换为数组格式，每个播放实例包含唯一标识符
+                    this.videoQueue = Object.keys(this.mediaData).map(jsonKey => {
+                        const config = this.mediaData[jsonKey];
+                        
+                        // 提取实际文件路径（移除#标识符）
+                        const actualPath = jsonKey.split('#')[0];
+                        const fileName = actualPath.split(/[\\/]/).pop();
+                        const loopStart = config.loop_start / 1000; // 转换为秒
+                        const loopEnd = config.loop_end / 1000;
+                        
+                        // 创建唯一标识符：文件名 + 起始时间 + 结束时间
+                        const uniqueId = `${fileName}_${loopStart.toFixed(3)}_${loopEnd.toFixed(3)}`;
+                        
+                        return {
+                            id: uniqueId,
+                            jsonKey: jsonKey,      // 保留JSON中的完整key
+                            path: actualPath,      // 实际文件路径
+                            fileName: fileName,
+                            loop_start: loopStart,
+                            loop_end: loopEnd
+                        };
+                    });
+                    
+                    if (this.videoQueue.length === 0) {
+                        throw new Error('video.json 中没有找到视频文件');
+                    }
+                    
+                    console.log(`加载了 ${this.videoQueue.length} 个播放实例`);
+                    
+                    // 显示去重统计信息
+                    const uniqueFiles = new Set(this.videoQueue.map(item => item.fileName));
+                    console.log(`包含 ${uniqueFiles.size} 个不同的视频文件`);
+                } catch (error) {
+                    throw new Error('无法加载 video.json: ' + error.message);
+                }
+            }
+            
+            setupPlayers() {
+                for (let i = 0; i < 4; i++) {
+                    const video = document.getElementById(`video${i}`);
+                    const info = document.getElementById(`info${i}`);
+                    
+                    this.players.push({
+                        video: video,
+                        info: info,
+                        currentVideo: null,
+                        timeoutId: null
+                    });
+                    
+                    video.addEventListener('loadstart', () => {
+                        console.log(`Player ${i} 开始加载视频`);
+                    });
+                    
+                    video.addEventListener('canplaythrough', () => {
+                        console.log(`Player ${i} 可以播放`);
+                    });
+                    
+                    video.addEventListener('error', (e) => {
+                        console.error(`Player ${i} 播放错误:`, e);
+                        this.playNextVideo(i);
+                    });
+                }
+            }
+            
+            shuffleQueue() {
+                for (let i = this.videoQueue.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [this.videoQueue[i], this.videoQueue[j]] = [this.videoQueue[j], this.videoQueue[i]];
+                }
+                console.log('队列已重新洗牌');
+            }
+            
+            startPlayback() {
+                this.isPlaying = true;
+                
+                // 为每个播放器分配初始视频
+                for (let i = 0; i < 4; i++) {
+                    this.playNextVideo(i);
+                }
+            }
+            
+            playNextVideo(playerId) {
+                if (!this.isPlaying) return;
+                
+                const player = this.players[playerId];
+                
+                // 清除之前的定时器
+                if (player.timeoutId) {
+                    clearTimeout(player.timeoutId);
+                }
+                
+                // 检查是否需要重新洗牌
+                if (this.currentIndex >= this.videoQueue.length) {
+                    this.currentIndex = 0;
+                    this.shuffleQueue();
+                }
+                
+                const videoData = this.videoQueue[this.currentIndex++];
+                player.currentVideo = videoData;
+                
+                // 更新信息显示
+                player.info.textContent = `${videoData.fileName} (${videoData.loop_start.toFixed(1)}s - ${videoData.loop_end.toFixed(1)}s)`;
+                
+                // 加载并播放视频
+                this.loadAndPlayVideo(player, videoData);
+            }
+            
+            loadAndPlayVideo(player, videoData) {
+                const video = player.video;
+                
+                // 处理文件路径 - 统一使用正斜杠作为分隔符
+                let videoSrc = videoData.path;
+                // 将Windows反斜杠转换为正斜杠
+                videoSrc = videoSrc.replace(/\\/g, '/');
+                
+                console.log(`尝试加载视频: ${videoData.id}`);
+                console.log(`文件路径: ${videoSrc}`);
+                console.log(`时间范围: ${videoData.loop_start}s - ${videoData.loop_end}s`);
+                
+                // 设置视频源
+                video.src = videoSrc;
+                
+                video.addEventListener('loadedmetadata', () => {
+                    console.log(`视频元数据已加载: ${videoData.fileName}, 总时长: ${video.duration}s`);
+                    // 设置起始时间
+                    video.currentTime = videoData.loop_start;
+                    console.log(`设置起始时间为: ${videoData.loop_start}s`);
+                }, { once: true });
+                
+                video.addEventListener('canplay', () => {
+                    console.log(`视频可以播放: ${videoData.fileName}`);
+                    video.play().then(() => {
+                        console.log(`视频开始播放: ${videoData.fileName}`);
+                    }).catch(error => {
+                        console.error('播放失败:', videoData.fileName, error);
+                        // 如果播放失败，跳到下一个视频
+                        this.playNextVideo(this.players.indexOf(player));
+                    });
+                }, { once: true });
+                
+                video.addEventListener('error', (e) => {
+                    console.error('视频加载错误:', videoData.path, e);
+                    // 显示错误信息
+                    player.info.textContent = `错误: ${videoData.fileName} (文件不存在或无法访问)`;
+                    player.info.style.color = '#ff6b6b';
+                    
+                    // 3秒后自动切换到下一个视频
+                    setTimeout(() => {
+                        this.playNextVideo(this.players.indexOf(player));
+                    }, 3000);
+                });
+                
+                // 监听时间更新，控制播放范围
+                const timeUpdateHandler = () => {
+                    if (video.currentTime >= videoData.loop_end) {
+                        video.removeEventListener('timeupdate', timeUpdateHandler);
+                        this.playNextVideo(this.players.indexOf(player));
+                    }
+                };
+                
+                video.addEventListener('timeupdate', timeUpdateHandler);
+            }
+            
+            hideLoading() {
+                const loading = document.getElementById('loading');
+                if (loading) {
+                    loading.style.display = 'none';
+                }
+            }
+            
+            showError(message) {
+                this.hideLoading();
+                
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'error';
+                errorDiv.textContent = message;
+                document.body.appendChild(errorDiv);
+                
+                console.error(message);
+            }
+            
+            // 暂停/恢复播放
+            togglePlayback() {
+                this.isPlaying = !this.isPlaying;
+                
+                this.players.forEach(player => {
+                    if (this.isPlaying) {
+                        player.video.play();
+                    } else {
+                        player.video.pause();
+                    }
+                });
+            }
+            
+            // 重新开始
+            restart() {
+                this.currentIndex = 0;
+                this.shuffleQueue();
+                this.players.forEach((player, index) => {
+                    player.video.pause();
+                    if (player.timeoutId) {
+                        clearTimeout(player.timeoutId);
+                    }
+                    this.playNextVideo(index);
+                });
+            }
+        }
+        
+        // 初始化播放器
+        let player;
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            player = new WallpaperPlayer();
+        });
+        
+    </script>
+</body>
+</html>
